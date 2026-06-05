@@ -1,3 +1,51 @@
-git add codemagic.yaml
-git commit -m 'Add first workflow'
-git push
+workflows:
+  android-workflow:
+    name: Build Android Debug APK
+    max_build_duration: 30
+    instance_type: mac_mini_m1
+    environment:
+      android_signing:
+        # If you set up code signing in Codemagic UI, you can reference it here.
+        # For debug builds, Gradle generates a default debug keystore automatically.
+      vars:
+        GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+          include: true
+          source: true
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+      - name: Reconstruct debug keystore
+        script: |
+          if command -v python3 &>/dev/null; then
+            python3 -c "import base64; open('debug.keystore', 'wb').write(base64.b64decode(open('debug.keystore.base64').read().strip()))"
+          elif command -v openssl &>/dev/null; then
+            openssl base64 -d -A -in debug.keystore.base64 -out debug.keystore
+          else
+            base64 -d debug.keystore.base64 > debug.keystore || base64 -D debug.keystore.base64 > debug.keystore || openssl base64 -d -in debug.keystore.base64 -out debug.keystore
+          fi
+      - name: Build APK with Gradle
+        script: |
+          # Don't use gradle wrapper if it is corrupted; download Gradle 9.3.1 directly
+          echo "Downloading Gradle 9.3.1..."
+          curl -sLO https://services.gradle.org/distributions/gradle-9.3.1-bin.zip
+          echo "Extracting Gradle..."
+          unzip -q gradle-9.3.1-bin.zip -d /tmp/gradle-dist
+          export PATH=/tmp/gradle-dist/gradle-9.3.1/bin:$PATH
+          
+          # Verify Gradle version
+          gradle --version
+          
+          # Build debug APK
+          gradle assembleDebug
+    artifacts:
+      - app/build/outputs/apk/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - hnamatollahi@gmail.com
